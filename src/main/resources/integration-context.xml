@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:int="http://www.springframework.org/schema/integration"
+       xmlns:int-amqp="http://www.springframework.org/schema/integration/amqp"
+       xmlns:rabbit="http://www.springframework.org/schema/rabbit"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+            http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+            http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration.xsd
+            http://www.springframework.org/schema/integration/amqp http://www.springframework.org/schema/integration/amqp/spring-integration-amqp.xsd
+            http://www.springframework.org/schema/rabbit http://www.springframework.org/schema/rabbit/spring-rabbit-1.6.xsd">
+
+    <int:filter input-channel="metrics.in" expression="payload.datetime.before(new java.util.Date())"
+                output-channel="metrics.filtered"
+                throw-exception-on-rejection="true"
+    />
+
+    <int:gateway service-interface="fr.efrei.dtcs.projet.service.MetricSenderService">
+        <int:method name="send" request-channel="metrics.in"/>
+    </int:gateway>
+
+    <int:service-activator input-channel="metrics.temperature" method="receive">
+        <bean class="fr.efrei.dtcs.projet.service.TemperatureMetricReceiverService"/>
+    </int:service-activator>
+
+    <int:service-activator input-channel="metrics.humidity" method="receive">
+        <bean class="fr.efrei.dtcs.projet.service.HumidityMetricReceiverService"/>
+    </int:service-activator>
+
+    <int:channel id="metrics.in">
+
+    </int:channel>
+
+    <int:channel id="metrics.filtered">
+
+    </int:channel>
+
+    <int:channel id="metrics.from-rabbit">
+        <int:interceptors>
+            <int:wire-tap channel="logger"/>
+        </int:interceptors>
+    </int:channel>
+
+    <int:logging-channel-adapter id="logger" level="DEBUG" />
+
+    <int:router input-channel="metrics.from-rabbit" expression="payload.type">
+        <int:mapping value="temperature" channel="metrics.temperature"/>
+        <int:mapping value="humidity" channel="metrics.humidity"/>
+    </int:router>
+
+
+    <int-amqp:outbound-channel-adapter
+            channel="metrics.filtered"
+            exchange-name="metrics.exchange"
+            routing-key="create-metric"
+            amqp-template="amqpTemplate"
+    />
+
+    <int-amqp:inbound-channel-adapter
+            channel="metrics.from-rabbit"
+            queue-names="metrics.queue"
+            connection-factory="connectionFactory"
+            concurrent-consumers="10"
+    />
+
+    <rabbit:connection-factory id="connectionFactory" host="localhost" />
+
+    <rabbit:template
+            id="amqpTemplate"
+            connection-factory="connectionFactory"
+    />
+
+    <rabbit:admin connection-factory="connectionFactory" />
+
+    <rabbit:queue name="metrics.queue" />
+
+    <rabbit:direct-exchange name="metrics.exchange">
+        <rabbit:bindings>
+            <rabbit:binding queue="metrics.queue" key="create-metric"/>
+        </rabbit:bindings>
+    </rabbit:direct-exchange>
+
+
+</beans>
